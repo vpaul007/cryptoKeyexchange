@@ -1,72 +1,77 @@
+import javax.crypto.*;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
 import java.security.*;
-import javax.crypto.KeyAgreement;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
-import java.util.Base64;
 import javax.crypto.Cipher;
+import java.security.interfaces.*;
+import java.util.Base64;
 
-public class F1Server {
+public class Server {
 
     public static void main(String[] args) throws Exception {
-        System.out.println("Server");
+        System.out.println("Server is running...");
 
-        // Server socket
+        // Step 1: Create a Server Socket to listen for connections
         ServerSocket serverSocket = new ServerSocket(2000);
-        Socket s = serverSocket.accept();
+        Socket socket = serverSocket.accept();
 
-        ObjectOutputStream oos = new ObjectOutputStream(s.getOutputStream());
-        ObjectInputStream ois = new ObjectInputStream(s.getInputStream());
+        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+        ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
 
-        // Step 1: Receive DH parameters from the client
-        String params = (String) ois.readObject();
-        System.out.println("Received Params: " + params);
+        // Step 2: Receive Diffie-Hellman parameters from the client
+        String params = (String) in.readObject();
+        System.out.println("Received DH Parameters from client: " + params);
 
-        // Step 2: Generate server's DH key pair using received parameters
+        // Step 3: Generate server's DH key pair
         String[] values = params.split(",");
-        BigInteger pp = new BigInteger(values[0]);
+        BigInteger p = new BigInteger(values[0]);
         BigInteger g = new BigInteger(values[1]);
         int l = Integer.parseInt(values[2]);
-        DHParameterSpec dhSpec = new DHParameterSpec(pp, g, l);
+        DHParameterSpec dhSpec = new DHParameterSpec(p, g, l);
 
-        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DH");
-        keyGen.initialize(dhSpec);
-        KeyPair keypair = keyGen.generateKeyPair();
-        PrivateKey sprivateKey = keypair.getPrivate();
-        PublicKey spublicKey = keypair.getPublic();
-        System.out.println("Server Public Key: " + spublicKey);
+        KeyPairGenerator keyPairGen = KeyPairGenerator.getInstance("DH");
+        keyPairGen.initialize(dhSpec);
+        KeyPair keyPair = keyPairGen.generateKeyPair();
+        PrivateKey serverPrivateKey = keyPair.getPrivate();
+        PublicKey serverPublicKey = keyPair.getPublic();
 
-        // Step 3: Send server's public key to the client
-        oos.writeObject(spublicKey);
+        // Step 4: Send the server's public key to the client
+        out.writeObject(serverPublicKey);
 
-        // Step 4: Receive client's public key
-        PublicKey cpublicKey = (PublicKey) ois.readObject();
-        System.out.println("Client Public Key: " + cpublicKey);
+        // Step 5: Receive the client's public key
+        PublicKey clientPublicKey = (PublicKey) in.readObject();
+        System.out.println("Received Client's Public Key: " + clientPublicKey);
 
-        // Step 5: Generate the shared secret using client's public key
+        // Step 6: Generate shared secret key
         KeyAgreement keyAgree = KeyAgreement.getInstance("DH");
-        keyAgree.init(sprivateKey);
-        keyAgree.doPhase(cpublicKey, true);
+        keyAgree.init(serverPrivateKey);
+        keyAgree.doPhase(clientPublicKey, true);
         byte[] sharedSecret = keyAgree.generateSecret();
 
-        // Step 6: Derive the symmetric key
-        SecretKey secretKey = new SecretKeySpec(sharedSecret, 0, 16, "AES"); // Use 128 bits for AES key
-        System.out.println("Shared Secret (Base64): " + Base64.getEncoder().encodeToString(sharedSecret));
+        // Step 7: Derive AES secret key from the shared secret
+        SecretKey secretKey = new SecretKeySpec(sharedSecret, 0, 16, "AES");
 
-        // Step 7: Example: Decrypt the message received from the client
-        byte[] encryptedMessage = (byte[]) ois.readObject();
+        // Step 8: Receive and decrypt the object sent by the client
+        byte[] encryptedProduct = (byte[]) in.readObject();
         Cipher cipher = Cipher.getInstance("AES");
         cipher.init(Cipher.DECRYPT_MODE, secretKey);
 
-        byte[] decryptedMessage = cipher.doFinal(encryptedMessage);
-        System.out.println("Decrypted Message: " + new String(decryptedMessage));
+        byte[] decryptedBytes = cipher.doFinal(encryptedProduct);
+        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(decryptedBytes);
+        ObjectInputStream objectInputStream = new ObjectInputStream(byteArrayInputStream);
+        Product product = (Product) objectInputStream.readObject();
+
+        // Step 9: Print the product details
+        System.out.println("Decrypted Product: " + product);
 
         // Close resources
-        ois.close();
-        oos.close();
-        s.close();
+        objectInputStream.close();
+        byteArrayInputStream.close();
+        in.close();
+        out.close();
+        socket.close();
         serverSocket.close();
     }
 }
